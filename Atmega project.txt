@@ -1,0 +1,222 @@
+#include<avr/io.h>
+#include<stdlib.h>
+#define FOSC 16000000 
+#define BAUD 9600
+#define MYUBRR FOSC/16/BAUD-1
+
+char d,d1;
+
+void USART_Init(unsigned int ubrr)
+{
+UBRR0H = (unsigned char)(ubrr>>8);
+UBRR0L = (unsigned char)ubrr;
+UCSR0B = (1<<RXEN0)|(1<<TXEN0);
+UCSR0C = (1<<USBS0)|(3<<UCSZ00);
+}
+
+void USART_Transmit(char *X)
+{
+ int i;
+ for(i=0;X[i]!='\0';i++)
+ {
+while (!(UCSR0A & (1<<UDRE0)));
+ UDR0 = X[i];
+}
+}
+
+unsigned char USART_Receive(void)
+{
+while (!(UCSR0A & (1<<RXC0)));
+return UDR0;
+}
+
+void USART_Flush() 
+{
+unsigned char dummy;
+while (UCSR0A & (1<<RXC0)) dummy = UDR0;
+}
+ 
+void dc_pwm(int OP)
+{
+TCCR0A |= (1<<COM0A1) | (1<<WGM01) | (1<<WGM00); 
+TCCR0B |= (1<<CS00);  
+OCR0A =((255*OP)/100);
+
+
+}
+
+void anticlock(int X)
+{  
+   int i;
+   for(i=0;i<(X/7.2);i++)
+  {
+    PORTD=(1<<5);
+    _delay_ms(100);
+    
+    PORTD&=~(1<<5);
+    PORTD=(1<<4);
+    _delay_ms(100);
+    
+    PORTD&=~(1<<4);
+     PORTD=(1<<3);
+   _delay_ms(100);
+   
+    PORTD&=~(1<<3);
+     PORTD=(1<<2);
+    _delay_ms(100);
+    
+    PORTD&=~(1<<2);
+  }
+}
+
+void clock1(int X)
+  {
+    int i;
+   for(i=0;i<(X/7.2);i++)
+  {
+    PORTD=(1<<2);
+    _delay_ms(100);
+    
+    PORTD&=~(1<<2);
+     PORTD=(1<<3);
+    _delay_ms(100);
+    
+    PORTD&=~(1<<3);
+     PORTD=(1<<4);
+   _delay_ms(100);
+    
+    PORTD&=~(1<<4);
+     PORTD=(1<<5);
+    _delay_ms(100);
+    
+    PORTD&=~(1<<5);
+  }
+}
+
+void IR()
+{
+  if((PINB&(1<<0))!=0)
+  {
+    USART_Transmit("OBJECT DETECTED\r\n");
+    clock1(90);
+  }
+   else 
+   {
+    USART_Transmit("OBJECT NOT DETECTED\r\n");
+    anticlock(90);
+   }
+}
+
+void GAS()
+{
+  int i,j;
+  char ch[5];
+  USART_Transmit("gas is:");
+  ADMUX=0b01000001;
+  ADCSRA=0b11000111;
+  while((ADCSRA&(1<<4))==0);
+  i=ADC;
+  i=((i*100)/1024);
+  sprintf(ch,"%d",i);
+  USART_Transmit(ch);   
+  USART_Transmit("\r\n");
+  if(i>=1)  
+  PORTB=(1<<1);
+}
+
+void TEMP()
+{
+  int i;
+  char ch[5];
+  ADMUX=0b01000000;
+  ADCSRA=0b11000111;
+  while((ADCSRA&(1<<4))==0);
+  i=ADC;
+  i=((-(i*5*100))/1024);
+  sprintf(ch,"%d",i);
+  USART_Transmit("temp is:");
+  USART_Transmit(ch);  USART_Transmit(" ");  USART_Transmit("c"); USART_Transmit("\r\n");
+  if(i>=26)  dc_pwm(90);
+  else   dc_pwm(30);
+}
+
+void stepper()
+{
+  int i,X;
+  char ch[3];
+  char data[]="enter the angle:";
+  USART_Transmit(data);
+  USART_Flush();
+  for(i=0;i<3;i++)
+  {
+    ch[i]=USART_Receive();
+  }  
+  ch[3]='\0'; 
+  USART_Transmit(ch);
+  USART_Flush();
+  USART_Transmit("\r\n");
+  USART_Flush();
+   X=atoi(ch);  
+   clock1(X);
+}
+
+void dc()
+{
+  int i,x;
+  char ch[5];
+  USART_Transmit("enter the duty cycle");
+  USART_Flush();
+  for(i=0;i<3;i++)
+  {
+    ch[i]=USART_Receive();
+  }
+  ch[3]='\0';   USART_Transmit(ch); USART_Transmit("\r\n");
+  x=atoi(ch);   dc_pwm(x);
+}
+
+int main()
+{
+  USART_Init(MYUBRR);
+  char data[]="1. manual mode   2.automode 3.motor and intication light will off\r\n";
+  char data1[]="1.stepper motor  2.dc motor\r\n";
+  char data2[]="*IR sensor  *Temperature sensor  *Gas sensor\r\n"; 
+  char data3[]="motor and intiaction stoped";
+  char data4[]="entered number not matching";
+  while(1)
+  {
+    DDRD=(0xf<<2)|(1<<PD6)|(1<<PD7);
+    DDRB=(1<<1);
+    PORTD&=~((0xf<<2)|(1<<7));
+     USART_Transmit(data);
+     USART_Flush();  
+     d=USART_Receive();
+ switch(d)
+ {
+  case '1':USART_Transmit(data1);
+           USART_Flush();
+           d1=USART_Receive();
+
+           
+           if(d1=='1')
+           {
+           stepper();
+           }
+           else if(d1=='2') 
+           {
+           dc();
+           }
+           break;
+  case '2':  USART_Transmit(data2); USART_Flush(); 
+             TEMP();  IR();  GAS();
+             break;
+  case  '3':USART_Transmit(data3);USART_Flush();
+             PORTB&=~(1<<1);
+             OCR0A =0;
+             break;
+   // default:  
+     //       USART_Transmit(data4);
+       //     USART_Transmit("/r/n");
+         //   break;            
+ }
+  }
+}
